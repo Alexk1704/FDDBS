@@ -1,0 +1,1150 @@
+options {
+  LOOKAHEAD = 1;
+  CHOICE_AMBIGUITY_CHECK = 2;
+  OTHER_AMBIGUITY_CHECK = 1;
+  STATIC = false;
+  DEBUG_PARSER = false;
+  DEBUG_LOOKAHEAD = false;
+  DEBUG_TOKEN_MANAGER = false;
+  ERROR_REPORTING = true;
+  JAVA_UNICODE_ESCAPE = false;
+  UNICODE_INPUT = false;
+  IGNORE_CASE = false;
+  USER_TOKEN_MANAGER = false;
+  USER_CHAR_STREAM = false;
+  BUILD_PARSER = true;
+  BUILD_TOKEN_MANAGER = true;
+  SANITY_CHECK = true;
+  FORCE_LA_CHECK = false;
+}
+
+PARSER_BEGIN(SqlParser)
+
+package fdbs.sql.parser;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.io.*;
+
+import fdbs.sql.parser.ast.*;
+import fdbs.sql.parser.ast.statement.*;
+import fdbs.sql.parser.ast.statement.select.*;
+import fdbs.sql.parser.ast.identifier.*;
+import fdbs.sql.parser.ast.constraint.*;
+import fdbs.sql.parser.ast.clause.*;
+import fdbs.sql.parser.ast.clause.boundary.*;
+import fdbs.sql.parser.ast.attribute.*;
+import fdbs.sql.parser.ast.type.*;
+import fdbs.sql.parser.ast.literal.*;
+import fdbs.sql.parser.ast.expression.*;
+import fdbs.sql.parser.ast.extension.*;
+import fdbs.sql.parser.ast.function.*;
+
+import fdbs.util.logger.*;
+
+/**
+ * A sql parser.
+ */
+public class SqlParser {
+
+  /**
+   * The Constructor for sql parser with a sql statement.
+   * @param statement A sql statement.
+   */
+  public SqlParser(String statement) {
+    this(new StringReader(statement));
+  }
+
+  private static void handleParseException(ParseException parseException) throws ParseException {
+    ParseException throwing = parseException;
+
+    if (parseException.expectedTokenSequences != null && parseException.expectedTokenSequences.length == 1) {
+      StringBuffer expected = new StringBuffer();
+      int nextTokenSize = 0;
+
+      for (int i = 0; i < parseException.expectedTokenSequences.length; i++) {
+
+        if (nextTokenSize <  parseException.expectedTokenSequences[i].length) {
+          nextTokenSize =  parseException.expectedTokenSequences[i].length;
+        }
+
+        for (int j = 0; j < parseException.expectedTokenSequences[i].length; j++) {
+          expected.append(parseException.tokenImage[parseException.expectedTokenSequences[i][j]]);
+        }
+      }
+
+      if(expected.toString().equals("<IDENTIFIER>") /* || expected.toString().equals("\"CONSTRAINT\"") */ ){
+        Token nextToken = parseException.currentToken.next;
+        String invalidIdentifierName = ParseException.add_escapes(nextToken.image);  
+        throwing = new ParseException(String.format("%s: Invalid identifier \"%s\" - You used a reserved word at line %s in column %s.", SqlParser.class.getSimpleName(), invalidIdentifierName, nextToken.beginLine, nextToken.beginColumn));
+      }
+    }
+   
+    throw throwing;
+  }
+}
+
+PARSER_END(SqlParser)
+
+/************************************************
+ *        TOKEN SPECIFICATION STARTS HERE       *
+ ************************************************/
+
+SKIP :
+{
+    " "
+  | "\t"
+  | "\n"
+  | "\r"
+}
+
+/* COMMENTS */
+SKIP :
+{
+  < "//" (~["\r", "\n"])* >
+  | < "/*" > : MULTI_LINE_COMMENT
+}
+
+<MULTI_LINE_COMMENT> SKIP :
+{
+  < "*/" > : DEFAULT
+  | < ~[] > // ~[] = all characters
+}
+
+/* LITERALS */
+TOKEN [IGNORE_CASE] :
+{
+    < INTEGER_CONSTANT: ("-")? ["0"-"9"] ( ["0"-"9"] )* >
+  | < STRING_CONSTANT: <SINGLE_QUOTE> ( ~["'"] )* <SINGLE_QUOTE> >
+}
+
+/* RESERVED WORDS */
+TOKEN [IGNORE_CASE] : 
+{
+  // ORACLE reserved words
+    < ACCESS: "ACCESS" >
+  | < ADD: "ADD" >
+  | < ALL: "ALL" >
+  | < ALTER: "ALTER" >
+  | < AND: "AND" >
+  | < ANY: "ANY" >
+  | < AS: "AS" >
+  | < ASC: "ASC" >
+  | < AUDIT: "AUDIT" >
+  | < BETWEEN: "BETWEEN" >
+  | < BY: "BY" >
+  | < CHAR: "CHAR" >
+  | < CHECK: "CHECK" >
+  | < CLUSTER: "CLUSTER" >
+  | < COLUMN: "COLUMN" >
+  | < COMMENT: "COMMENT" >
+  | < COMPRESS: "COMPRESS" >
+  | < CONNECT: "CONNECT" >
+  | < CREATE: "CREATE" >
+  | < CURRENT: "CURRENT" >
+  | < DATE: "DATE" >
+  | < DECIMAL: "DECIMAL" >
+  | < DEFAULT_Token: "DEFAULT" > // Rename "Default_Token" to "DEFAULT" -> Lexical token name "DEFAULT" is the same as that of a lexical state.
+  | < DELETE: "DELETE" >
+  | < DESC: "DESC" >
+  | < DISTINCT: "DISTINCT" >
+  | < DROP: "DROP" >
+  | < ELSE: "ELSE" >
+  | < EXCLUSIVE: "EXCLUSIVE" >
+  | < EXISTS: "EXISTS" >
+  | < FILE: "FILE" >
+  | < FLOAT: "FLOAT" >
+  | < FOR: "FOR" >
+  | < FROM: "FROM" >
+  | < GRANT: "GRANT" >
+  | < GROUP: "GROUP" >
+  | < HAVING: "HAVING" >
+  | < IDENTIFIED: "IDENTIFIED" >
+  | < IMMEDIATE: "IMMEDIATE" >
+  | < IN: "IN" >
+  | < INCREMENT: "INCREMENT" >
+  | < INDEX: "INDEX" >
+  | < INITIAL: "INITIAL" >
+  | < INSERT: "INSERT" >
+  | < INTEGER: "INTEGER" >
+  | < INTERSECT: "INTERSECT" >
+  | < INTO: "INTO" >
+  | < IS: "IS" >
+  | < LEVEL: "LEVEL" >
+  | < LIKE: "LIKE" >
+  | < LOCK: "LOCK" >
+  | < LONG: "LONG" >
+  | < MAXEXTENTS: "MAXEXTENTS" >
+  | < MINUS: "MINUS" >
+  | < MLSLABEL: "MLSLABEL" >
+  | < MODE: "MODE" >
+  | < MODIFY: "MODIFY" >
+  | < NOAUDIT: "NOAUDIT" >
+  | < NOCOMPRESS: "NOCOMPRESS" >
+  | < NOT: "NOT" >
+  | < NOWAIT: "NOWAIT" >
+  | < NULL: "NULL" >
+  | < NUMBER: "NUMBER" >
+  | < OF: "OF" >
+  | < OFFLINE: "OFFLINE" >
+  | < ON: "ON" >
+  | < ONLINE: "ONLINE" >
+  | < OPTION: "OPTION" >
+  | < OR: "OR" >
+  | < ORDER: "ORDER" >
+  | < PCTFREE: "PCTFREE" >
+  | < PRIOR: "PRIOR" >
+  | < PUBLIC: "PUBLIC" >
+  | < RAW: "RAW" >
+  | < RENAME: "RENAME" >
+  | < RESOURCE: "RESOURCE" >
+  | < REVOKE: "REVOKE" >
+  | < ROW: "ROW" >
+  | < ROWNUM: "ROWNUM" >
+  | < ROWS: "ROWS" >
+  | < SELECT: "SELECT" >
+  | < SESSION: "SESSION" >
+  | < SET: "SET" >
+  | < SHARE: "SHARE" >
+  | < SIZE: "SIZE" >
+  | < SMALLINT: "SMALLINT" >
+  | < START: "START" >
+  | < SUCCESSFUL: "SUCCESSFUL" >
+  | < SYNONYM: "SYNONYM" >
+  | < SYSDATE: "SYSDATE" >
+  | < TABLE: "TABLE" >
+  | < THEN: "THEN" >
+  | < TO: "TO" >
+  | < TRIGGER: "TRIGGER" >
+  | < UID: "UID" >
+  | < UNION: "UNION" >
+  | < UNIQUE: "UNIQUE" >
+  | < UPDATE: "UPDATE" >
+  | < USER: "USER" >
+  | < VALIDATE: "VALIDATE" >
+  | < VALUES: "VALUES" >
+  | < VARCHAR: "VARCHAR" >
+  | < VARCHAR2: "VARCHAR2" >
+  | < VIEW: "VIEW" >
+  | < WHENEVER: "WHENEVER" >
+  | < WHERE: "WHERE" >
+  | < WITH: "WITH" >
+  // ORACLE reserved words only for Attribute Identifiers
+  | < COLUMN_VALUE: "COLUMN_VALUE" >
+  | < NESTED_TABLE_IDCOLUMN_VALUE: "NESTED_TABLE_IDCOLUMN_VALUE" >
+  // Other OJDBC reserverd words
+  | < CONSTRAINT: "CONSTRAINT" >
+  | < PRIMARYKEY: "PRIMARY KEY" >
+  | < FOREIGNKEY: "FOREIGN KEY" >
+  | < REFERENCES: "REFERENCES" >
+  | < CascadeConstraints: "CASCADE CONSTRAINTS" >
+  | < PURGE: "PURGE" >
+  | < COUNT: "COUNT" >
+  | < SUM: "SUM" >
+  | < MAX: "MAX" >
+  | < STAR: "*" >
+  // FDBS reserverd wrds
+  | < HORIZONTAL: "HORIZONTAL" >
+  | < VERTICAL: "VERTICAL" >
+}
+
+/* Identifier */
+TOKEN [IGNORE_CASE] :
+{
+  < IDENTIFIER: ( ["a"-"z"] | ["0"-"9"] | "_" )+ >
+}
+
+/* SEPARATORS */
+TOKEN :
+{
+    < LPAREN: "(" >
+  | < RPAREN: ")" >
+  | < COMMA: "," >
+  | < SEMICOLON: ";" >
+  | < SINGLE_QUOTE: "'" >
+  | < DOT: "." >
+}
+
+/* Comparisons */
+TOKEN [IGNORE_CASE] : 
+{
+    < LT: "<" >
+  | < LEQ: "<=" >
+  | < GEQ: ">=" >
+  | < GT: ">" >
+  | < NEQ: "!=" >
+  | < EQ: "=" >
+}
+
+/************************************************
+ * THE SQL GRAMMAR SPECIFICATION STARTS HERE *
+ ************************************************/
+/**
+ * Parse a sql statement and builds an abstract syntax tree related to the statement.
+ * @return the abstract syntax tree related to constructor statement parameter
+ * @throws ParseException
+ */
+AST parseStatement() :
+{  Statement rootNode; }
+{
+  {
+    Logger.infoln(String.format("%s: Parsing and constructing Abstract syntax tree startet.", this.getClass().getSimpleName()));
+  }
+  try {
+    rootNode = Statement() <EOF>
+    {
+      AST ast = new AST();
+      ast.setRoot(rootNode);
+      Logger.infoln(String.format("%s: Parsing and constructing Abstract syntax tree finished.", this.getClass().getSimpleName()));
+      return ast;
+    }
+	} catch (ParseException parseException) {
+    handleParseException(parseException);
+	}
+}
+
+/**
+ * Parse a sql statement.
+ * @return Returns the parsed sql statement.
+ */
+Statement Statement() :
+{ Statement statement; }
+{
+  (
+     statement = DDLStatement()
+    |
+     statement = DMLStatement()
+    |
+     statement = DQLStatement()
+  )
+  { return statement; }
+}
+
+/*****************************************************************
+ * Data Definition Language (DDL) SPECIFICATION STARTS HERE *
+ *****************************************************************/
+
+/**
+ * Parse a data definition language statement.
+ * @return Returns the parsed data definition language statement.
+ */
+Statement DDLStatement() :
+{ Statement statement; }
+{
+  (
+     statement = FederationCreateTableStatement()
+    |
+     statement =  DropTableStatement()
+  )
+  { return statement; }
+}
+
+/**
+ * Parse a federated create table statement.
+ * @return Returns the parsed federated create table statement.
+ */
+Statement FederationCreateTableStatement() : 
+{
+  CreateTableStatement statement;
+  HorizontalClause horizontalClause;
+  VerticalClause verticalClause;
+}
+{
+  statement = CreateTableStatement() 
+  [ 
+     horizontalClause = HorizontalClause() { statement.setHorizontalClause(horizontalClause); } 
+    | 
+     verticalClause = VerticalClause() { statement.setVerticalClause(verticalClause); } 
+  ]
+  { return statement; }
+}
+
+/**
+ * Parse a create table statement.
+ * @return Returns the parsed create table statement.
+ */
+CreateTableStatement CreateTableStatement() :
+{
+  TableIdentifier identifier;
+  List<TableAttribute> attributes;
+  List<Constraint> constraints;
+}
+{
+  <CREATE> <TABLE> identifier = TableIdentifier() <LPAREN> attributes = ListOfTableAttributes() <COMMA> constraints = ListOfConstraints() <RPAREN>
+  { return new CreateTableStatement(identifier, attributes, constraints); }
+}
+
+/**
+ * Parse a horizontal clause.
+ * @return Returns the parsed horizontal clause.
+ */
+HorizontalClause HorizontalClause() : 
+{
+  AttributeIdentifier identifier;
+  Boundary boundary;
+  Boundary additionalBoundary = null;
+}
+{
+  <HORIZONTAL> 
+  <LPAREN> identifier = AttributeIdentifier()
+    <LPAREN> ( boundary = IntegerBoundary() | boundary = StringBoundary() ) [ <COMMA> ( additionalBoundary = IntegerBoundary() | additionalBoundary = StringBoundary() ) ] <RPAREN> 
+  <RPAREN>
+  { return new HorizontalClause(identifier, additionalBoundary == null ? null : boundary, additionalBoundary == null ? boundary : additionalBoundary); }
+}
+
+/**
+ * Parse a horizontal clause integer boundary.
+ * @return Returns the parsed horizontal clause integer boundary.
+ */
+Boundary IntegerBoundary() : 
+{ IntegerLiteral literal; }
+{
+  literal = IntegerLiteral()
+  { return new IntegerBoundary(literal); }
+}
+
+/**
+ * Parse a horizontal clause string boundary.
+ * @return Returns the parsed horizontal clause string boundary.
+ */
+Boundary StringBoundary() : 
+{ StringLiteral literal; }
+{  
+  literal = StringLiteral()
+  { return new StringBoundary(literal); }
+}
+
+/**
+ * Parse a vertical clause.
+ * @return Returns the parsed vertical clause.
+ */
+VerticalClause VerticalClause() : 
+{
+  List<AttributeIdentifier> attributesForDB1;
+  List<AttributeIdentifier> attributesForDB2;
+  List<AttributeIdentifier> attributesForDB3 = null;
+}
+{
+  <VERTICAL> <LPAREN> attributesForDB1 = VerticalListOfAttributes() <COMMA> attributesForDB2 = VerticalListOfAttributes() [ <COMMA> attributesForDB3 = VerticalListOfAttributes() ] <RPAREN>
+  { return new VerticalClause(attributesForDB1, attributesForDB2, attributesForDB3); }
+}
+
+/**
+ * Parse a list of vertical clause attributes.
+ * @return Returns the parsed list of vertical clause attributes.
+ */
+List<AttributeIdentifier> VerticalListOfAttributes() :
+{ 
+  List<AttributeIdentifier> attibutes = new ArrayList<AttributeIdentifier>(); 
+  AttributeIdentifier identifier;
+}
+{
+  <LPAREN> 
+    identifier = AttributeIdentifier() { attibutes.add(identifier); }
+    ( <COMMA> identifier = AttributeIdentifier() { attibutes.add(identifier); } )* 
+  <RPAREN> 
+  { return attibutes; }
+}
+
+/**
+ * Parse a list of table attributes.
+ * @return Returns the parsed list of table attributes.
+ */
+List<TableAttribute> ListOfTableAttributes() :
+{ 
+  List<TableAttribute> attributes = new ArrayList<TableAttribute>();
+  TableAttribute attribute;
+}
+{
+  attribute = TableAttribute() { attributes.add(attribute); }
+  ( 
+    LOOKAHEAD(<COMMA> TableAttribute()) 
+    <COMMA> attribute = TableAttribute() { attributes.add(attribute); } 
+  )* 
+  { return attributes; }
+}
+
+/**
+ * Parse a table attribute.
+ * @return Returns the parsed table attribute.
+ */
+TableAttribute TableAttribute() : 
+{
+  AttributeIdentifier identifier;
+  Type type;
+  Literal defaultValue = null;
+}
+{
+  identifier = AttributeIdentifier() type = AttributeType() [ <DEFAULT_Token> <LPAREN> ( defaultValue = IntegerLiteral() | defaultValue = StringLiteral() ) <RPAREN> ]
+  { return new TableAttribute(identifier, type, defaultValue); }
+}
+
+/**
+ * Parse a table attribute type.
+ * @return Returns the parsed table attribute type.
+ */
+Type AttributeType() :
+{
+  Token idToken;
+  IntegerLiteral varCharLength;
+  Type type;
+}
+{
+  (
+     idToken = <INTEGER> { type = new PrimitiveType(idToken.image); }
+    |
+     <VARCHAR> <LPAREN> varCharLength = IntegerLiteral() <RPAREN> { type = new VarCharType(varCharLength); }
+  )
+  { return type; }
+}
+
+/**
+ * Parse a list of constraints which must contains a primary key constraint.
+ * @return Returns the parsed list of constraints.
+ */
+List<Constraint> ListOfConstraints() :
+{ 
+  List<Constraint> constraints = new ArrayList<Constraint>();
+  Constraint constraint;
+  boolean containsPrimaryKeyConstraint = false;
+  ConstraintIdentifier constraintIdentifier;
+}
+{
+  constraintIdentifier = ConstraintPrefix() ( ( constraint = PrimaryKeyConstraint(constraintIdentifier) { containsPrimaryKeyConstraint = true; } ) | constraint = UniqueConstraint(constraintIdentifier) | constraint = ForeignKeyConstraint(constraintIdentifier) | constraint = CheckConstraint(constraintIdentifier) )
+  { constraints.add(constraint); }
+  ( 
+    <COMMA> constraintIdentifier = ConstraintPrefix() ( ( constraint = PrimaryKeyConstraint(constraintIdentifier) { containsPrimaryKeyConstraint = true; } ) | constraint = UniqueConstraint(constraintIdentifier) | constraint = ForeignKeyConstraint(constraintIdentifier) | constraint = CheckConstraint(constraintIdentifier) ) 
+    { constraints.add(constraint); }
+  )* 
+  { 
+    if(!containsPrimaryKeyConstraint){
+      throw new ParseException(String.format("%s: A CREATE TABLE statement requires a primary key constraint.", this.getClass().getSimpleName()));
+    }
+
+    return constraints; 
+  }
+}
+
+/**
+ * Parse a constraint prefix.
+ * @return Returns the parsed constraint prefix.
+ */
+ConstraintIdentifier ConstraintPrefix() :
+{ Token identifier; }
+{
+  <CONSTRAINT> identifier = <IDENTIFIER>
+  { return new ConstraintIdentifier(identifier); }
+}
+
+/**
+ * Parse a primary key constraint.
+ * @param constraintIdentifier A constraint identifier node which represent the primary key constraint name.
+ * @return Returns the parsed primary key constraint.
+ */
+PrimaryKeyConstraint PrimaryKeyConstraint(ConstraintIdentifier constraintIdentifier) :
+{ AttributeIdentifier attributeIdentifier; }
+{
+  <PRIMARYKEY> <LPAREN> attributeIdentifier = AttributeIdentifier() <RPAREN>
+  { return new PrimaryKeyConstraint(constraintIdentifier, attributeIdentifier); }
+}
+
+/**
+ * Parse a unique constraint.
+ * @param constraintIdentifier A constraint identifier node which represent the unique constraint name.
+ * @return Returns the parsed unique constraint.
+ */
+UniqueConstraint UniqueConstraint(ConstraintIdentifier constraintIdentifier) :
+{ AttributeIdentifier attributeIdentifier; }
+{
+  <UNIQUE> <LPAREN> attributeIdentifier = AttributeIdentifier() <RPAREN>
+  { return new UniqueConstraint(constraintIdentifier, attributeIdentifier); }
+}
+
+/**
+ * Parse a foreign key constraint.
+ * @param constraintIdentifier A constraint identifier node which represent the foreign key constraint name.
+ * @return Returns the parsed foreign key constraint.
+ */
+ForeignKeyConstraint ForeignKeyConstraint(ConstraintIdentifier constraintIdentifier) :
+{
+  AttributeIdentifier attributeIdentifier;
+  TableIdentifier referencedTable;
+  AttributeIdentifier referencedAttribute;
+}
+{
+  <FOREIGNKEY> <LPAREN> attributeIdentifier = AttributeIdentifier() <RPAREN> <REFERENCES> referencedTable = TableIdentifier() <LPAREN> referencedAttribute = AttributeIdentifier() <RPAREN>
+  { return new ForeignKeyConstraint(constraintIdentifier, attributeIdentifier, referencedTable, referencedAttribute); }
+}
+
+/**
+ * Parse a check constraint.
+ * @param constraintIdentifier A constraint identifier node which represent the check constraint name.
+ * @return Returns the parsed check constraint.
+ */
+CheckConstraint CheckConstraint(ConstraintIdentifier constraintIdentifier) :
+{ 
+  AttributeIdentifier attributeIdentifier;
+  Expression expression;
+}
+{
+  <CHECK> <LPAREN> attributeIdentifier = AttributeIdentifier() ( expression = NotNull(attributeIdentifier) | expression = Between(attributeIdentifier) | expression = CheckComparison(attributeIdentifier) ) <RPAREN>
+  { return new CheckConstraint(constraintIdentifier, expression); }
+}
+
+/**
+ * Parse a check constraint null condition.
+ * @param attributeIdentifier A attribute identifier node which represent the check constraint condition attribute name.
+ * @return Returns the parsed check constraint null condition.
+ */
+UnaryExpression NotNull(AttributeIdentifier attributeIdentifier) :
+{}
+{
+  <IS> <NOT> <NULL>
+  { return new UnaryExpression(attributeIdentifier, UnaryExpression.Operator.ISNOTNULL); }
+}
+
+/**
+ * Parse a check constraint between condition.
+ * @param attributeIdentifier A attribute identifier node which represent the check constraint condition attribute name.
+ * @return Returns the parsed check constraint between condition.
+ */
+BetweenExpression Between(AttributeIdentifier attributeIdentifier) :
+{ 
+  BinaryExpression.Operator operator; 
+  Literal min;
+  Literal max;
+}
+{
+  <BETWEEN> min = Constant() <AND> max = Constant()
+  { return new BetweenExpression(attributeIdentifier, min, max); }
+}
+
+/**
+ * Parse a check constraint comparison condition.
+ * @param attributeIdentifier A attribute identifier node which represent the check constraint condition attribute name.
+ * @return Returns the parsed check constraint comparison condition.
+ */
+BinaryExpression CheckComparison(AttributeIdentifier attributeIdentifier) :
+{ 
+  BinaryExpression.Operator operator;
+  Literal rightConstant = null;
+  AttributeIdentifier rightAttributeIdentifier = null;
+}
+{
+   operator = ComparisonOperator() 
+   (
+      rightAttributeIdentifier = AttributeIdentifier()
+     | 
+      rightConstant = Constant() 
+   )
+   { return rightConstant == null ? 
+      new BinaryExpression(attributeIdentifier, operator, rightAttributeIdentifier) : 
+      new BinaryExpression(attributeIdentifier, operator, rightConstant); 
+   }
+}
+
+/**
+ * Parse a drop table statement.
+ * @return Returns the parsed drop table statement.
+ */
+Statement DropTableStatement() : 
+{ 
+  TableIdentifier tableIdentifier;
+  Token cascadeConstraints = null;
+  Token purge = null;
+}
+{
+  <DROP> <TABLE> tableIdentifier = TableIdentifier() [ cascadeConstraints = <CascadeConstraints> ] // [ purge = <PURGE> ]
+  { return new DropTableStatement(tableIdentifier, cascadeConstraints != null ? new CascadeConstraintsExtension() : null, purge != null ? new PurgeExtension() : null); }
+}
+
+/*****************************************************************
+ * Data Manipulation Language (DML) SPECIFICATION STARTS HERE *
+ *****************************************************************/
+
+/**
+ * Parse a data manipulation language statement.
+ * @return Returns the parsed data manipulation language statement.
+ */
+Statement DMLStatement() :
+{ Statement statement; }
+{
+  (
+     statement = InsertStatement()
+    |
+     statement = DeleteStatement()
+    |
+     statement = UpdateStatement()
+  )
+  { return statement; }
+}
+
+/**
+ * Parse a insert statement.
+ * @return Returns the parsed insert statement.
+ */
+Statement InsertStatement() :
+{ 
+  TableIdentifier identifier; 
+  List<Literal> values;
+}
+{
+  <INSERT> <INTO> identifier = TableIdentifier() values = Values()
+  { return new InsertStatement(identifier, values); }
+}
+
+/**
+ * Parse a list of values.
+ * @return Returns the parsed list of values.
+ */
+List<Literal> Values() : 
+{ 
+  List<Literal> constants = new ArrayList<Literal>();
+  Literal constant; 
+}
+{
+  <VALUES> 
+    <LPAREN> constant = Constant() { constants.add(constant); }
+    ( <COMMA> constant = Constant() { constants.add(constant); } )* 
+  <RPAREN>
+  { return constants; }
+}
+
+/**
+ * Parse a delete statement.
+ * @return Returns the parsed delete statement.
+ */
+Statement DeleteStatement() : 
+{ 
+  TableIdentifier identifier;
+  WhereClause whereClause = null;
+}
+{
+  <DELETE> <FROM> identifier = TableIdentifier() [ whereClause = WhereClause() ] 
+  { return new DeleteStatement(identifier, whereClause); }
+}
+
+/**
+ * Parse a update statement.
+ * @return Returns the parsed update statement.
+ */
+Statement UpdateStatement() : 
+{ 
+  TableIdentifier tableIdentifier; 
+  AttributeIdentifier attributeIdentifier;
+  Literal constant;
+  WhereClause whereClause = null;
+}
+{
+  <UPDATE> tableIdentifier = TableIdentifier() <SET> attributeIdentifier = AttributeIdentifier() <EQ> constant = Constant() [ whereClause = WhereClause() ] 
+  { return new UpdateStatement(tableIdentifier, attributeIdentifier, constant, whereClause); }
+}
+
+/**
+ * Parse a data manipulation where clause.
+ * @return Returns the parsed data manipulation where clause.
+ */
+WhereClause WhereClause() :
+{ BinaryExpression binaryExpression; }
+{
+  <WHERE> binaryExpression = DMLWhereComparison()
+  { return new WhereClause(binaryExpression); }
+}
+
+/**
+ * Parse a data manipulation where comparison.
+ * @return Returns the parsed data manipulation where comparison.
+ */
+BinaryExpression DMLWhereComparison() :
+{ 
+  AttributeIdentifier attributeIdentifier;
+  BinaryExpression.Operator operator;
+  Literal rightConstant;
+}
+{
+   attributeIdentifier = AttributeIdentifier() operator = ComparisonOperator() rightConstant = Constant() 
+   { return new BinaryExpression(attributeIdentifier, operator, rightConstant); }
+}
+
+/*****************************************************************
+ * Data Query Language (DQL) SPECIFICATION STARTS HERE *
+ *****************************************************************/
+
+/**
+ * Parse a data query language statement.
+ * @return Returns the parsed data query language statement.
+ */
+Statement DQLStatement() :
+{
+  Statement statement;
+}
+{
+  <SELECT>
+  (
+     statement = SelectCountAllTableStatement()
+    |
+     LOOKAHEAD(FullyQualifiedAttributeIdentifier() <COMMA> ( <COUNT> |  <SUM> | <MAX> ) )
+     statement = SelectGroupStatement()
+    |
+     statement = SelectNoGroupStatement()
+  )
+  { return statement; }
+}
+
+/**
+ * Parse a select count all table statement.
+ * @return Returns the parsed select count all table statement.
+ */
+SelectCountAllTableStatement SelectCountAllTableStatement() :
+{ 
+  TableIdentifier tableIdentifier;
+  CountFunction countFunction; 
+}
+{
+  countFunction = CountFunction() <FROM> tableIdentifier = TableIdentifier()
+  { return new SelectCountAllTableStatement(countFunction, tableIdentifier); }
+}
+
+/**
+ * Parse a select no group statement.
+ * @return Returns the parsed select no group statement.
+ */
+SelectNoGroupStatement SelectNoGroupStatement() :
+{
+  AllAttributeIdentifier allAttributeIdentifier = null;
+  List<FullyQualifiedAttributeIdentifier> fQattributeIdentifiers = new ArrayList<FullyQualifiedAttributeIdentifier>();
+  List<TableIdentifier> tableIdentifiers;
+  WhereClause whereClause = null;
+}
+{
+  ( allAttributeIdentifier = AllAttributeIdentifier() | fQattributeIdentifiers = ListOfFullyQualifiedAttributeIdentifiers() ) 
+  <FROM> 
+  tableIdentifiers = ListOfTableIdentifier() 
+  [ whereClause = SelectWhereClause() ]
+  { 
+    return allAttributeIdentifier == null ? 
+      new SelectNoGroupStatement(fQattributeIdentifiers, tableIdentifiers, whereClause) : 
+      new SelectNoGroupStatement(allAttributeIdentifier, tableIdentifiers, whereClause); 
+  }
+}
+
+/**
+ * Parse a select group statement.
+ * @return Returns the parsed select group statement.
+ */
+SelectGroupStatement SelectGroupStatement() :
+{
+  FullyQualifiedAttributeIdentifier fQAttributeIdentifier;
+  Function function;
+  List<TableIdentifier> tableIdentifiers;
+  WhereClause whereClause = null;
+  GroupByClause groupByClause;
+  HavingClause havingClause = null;
+}
+{
+  fQAttributeIdentifier = FullyQualifiedAttributeIdentifier() <COMMA> 
+  ( 
+     function = CountFunction()
+    | 
+     function = SumFunction()
+    | 
+     function = MaxFunction()
+  )
+  <FROM> tableIdentifiers = ListOfTableIdentifier() 
+  [ whereClause = SelectWhereClause() ] 
+  groupByClause = GroupBySuffix()
+  [ havingClause = SelectHavingSuffix() ]
+  { return new SelectGroupStatement(fQAttributeIdentifier, function, tableIdentifiers, whereClause, groupByClause, havingClause); }
+}
+
+/**
+ * Parse a select group by clause.
+ * @return Returns the parsed select group by clause.
+ */
+GroupByClause GroupBySuffix() :
+{ FullyQualifiedAttributeIdentifier fQAttributeIdentifier; }
+{
+  <GROUP> <BY> fQAttributeIdentifier = FullyQualifiedAttributeIdentifier()
+  { return new GroupByClause(fQAttributeIdentifier); }
+}
+
+/**
+ * Parse a select having clause.
+ * @return Returns the parsed select having clause.
+ */
+HavingClause SelectHavingSuffix() :
+{
+  CountFunction countFunction;
+  IntegerLiteral integerLiteral;
+  BinaryExpression.Operator operator;
+}
+{
+  <HAVING> <LPAREN> countFunction = CountFunction() operator = ComparisonOperator() integerLiteral = IntegerLiteral() <RPAREN>
+  { return new HavingClause(new BinaryExpression(countFunction, operator, integerLiteral)); }
+}
+
+/**
+ * Parse a list of table identifier names.
+ * @return Returns the parsed list of table identifier names.
+ */
+List<TableIdentifier> ListOfTableIdentifier() :
+{ 
+  TableIdentifier tableIdentifier;
+  List<TableIdentifier> tableIdentifiers = new ArrayList<TableIdentifier>(); 
+}
+{
+  tableIdentifier = TableIdentifier() { tableIdentifiers.add(tableIdentifier); } [ <COMMA> tableIdentifier = TableIdentifier() { tableIdentifiers.add(tableIdentifier); } ]
+  { return tableIdentifiers; }
+}
+
+/**
+ * Parse a list of fully qualified attribute identifier names.
+ * @return Returns the parsed list of fully qualified attribute identifier names.
+ */
+List<FullyQualifiedAttributeIdentifier> ListOfFullyQualifiedAttributeIdentifiers() :
+{
+  List<FullyQualifiedAttributeIdentifier> fQattributeIdentifiers = new ArrayList<FullyQualifiedAttributeIdentifier>(); 
+  FullyQualifiedAttributeIdentifier fQAttributeIdentifier;
+}
+{
+  fQAttributeIdentifier = FullyQualifiedAttributeIdentifier() { fQattributeIdentifiers.add(fQAttributeIdentifier); } 
+  ( <COMMA> fQAttributeIdentifier = FullyQualifiedAttributeIdentifier() { fQattributeIdentifiers.add(fQAttributeIdentifier); } )* 
+  { return fQattributeIdentifiers; }
+}
+
+/**
+ * Parse a select where clause.
+ * @return Returns the parsed select where clause.
+ */
+WhereClause SelectWhereClause() :
+{  BinaryExpression binaryExpression; }
+{
+  <WHERE>
+  (   
+    LOOKAHEAD(<LPAREN> <LPAREN>) 
+     binaryExpression = ListOfNonJoinConditions()
+    |
+     binaryExpression = JoinConditionWithNonJoinCondition()
+  )
+  { return new WhereClause(binaryExpression); }
+}
+
+/**
+ * Parse a join condition and optional a non join condition.
+ * @return Returns the parsed join condition and optional a non join condition as a nested binary expression.
+ */
+BinaryExpression JoinConditionWithNonJoinCondition() :
+{
+  BinaryExpression binaryExpressionLeft;
+  BinaryExpression.Operator operator = null; 
+  BinaryExpression binaryExpressionRight = null;
+}
+{
+  binaryExpressionLeft = JoinCondition() [ <AND> { operator = BinaryExpression.Operator.AND; } binaryExpressionRight = ListOfNonJoinConditions() ]
+  { 
+    return operator != null && binaryExpressionRight != null ?
+     new BinaryExpression(binaryExpressionLeft, operator, binaryExpressionRight) :
+     binaryExpressionLeft; 
+  }
+}
+
+/**
+ * Parse a join condition.
+ * @return Returns the parsed join condition as a binary expression.
+ */
+BinaryExpression JoinCondition() :
+{
+  FullyQualifiedAttributeIdentifier fQAttributeIdentifierLeft;
+  BinaryExpression.Operator operator; 
+  FullyQualifiedAttributeIdentifier fQAttributeIdentifierRight;
+}
+{
+  <LPAREN> fQAttributeIdentifierLeft = FullyQualifiedAttributeIdentifier() 
+  ( <EQ> { operator = BinaryExpression.Operator.EQ; } | <LEQ> { operator = BinaryExpression.Operator.LEQ; } )
+  fQAttributeIdentifierRight = FullyQualifiedAttributeIdentifier() <RPAREN>
+  { return new BinaryExpression(fQAttributeIdentifierLeft, operator, fQAttributeIdentifierRight); }
+}
+
+/**
+ * Parse a combined of non join condition.
+ * @return Returns the parsed list of non join condition as a nested binary expression.
+ */
+BinaryExpression ListOfNonJoinConditions() :
+{
+  BinaryExpression binaryExpressionLeft;
+  BinaryExpression.Operator operator = null;
+  BinaryExpression binaryExpressionRight = null;
+}
+{
+  <LPAREN> binaryExpressionLeft = NonJoinCondition() [ [ <AND> { operator = BinaryExpression.Operator.AND; }  | <OR> { operator = BinaryExpression.Operator.OR; }  ] binaryExpressionRight = NonJoinCondition() ] <RPAREN>
+  { 
+    return operator != null && binaryExpressionRight != null ? 
+      new BinaryExpression(binaryExpressionLeft, operator, binaryExpressionRight) : 
+      binaryExpressionLeft; 
+  }
+}
+
+/**
+ * Parse a non join condition.
+ * @return Returns the parsed non join condition as a binary expression.
+ */
+BinaryExpression NonJoinCondition() :
+{ 
+  FullyQualifiedAttributeIdentifier fQAttributeIdentifier;
+  BinaryExpression.Operator operator; 
+  Literal literal;
+}
+{
+   <LPAREN> fQAttributeIdentifier = FullyQualifiedAttributeIdentifier() operator = ComparisonOperator() literal = Constant() <RPAREN>
+   { return new BinaryExpression(fQAttributeIdentifier, operator, literal); }
+}
+
+
+/*****************************************************************
+ * General Procutions STARTS HERE *
+ *****************************************************************/
+
+/**
+ * Parse a comparison operator.
+ * @return Returns the parsed comparison operator.
+ */
+BinaryExpression.Operator ComparisonOperator() :
+{ BinaryExpression.Operator operator; }
+{
+  (
+     <EQ> { operator = BinaryExpression.Operator.EQ; }
+    |
+     <NEQ> { operator = BinaryExpression.Operator.NEQ; }
+    |
+     <GT> { operator = BinaryExpression.Operator.GT; }
+    |
+     <GEQ> { operator = BinaryExpression.Operator.GEQ; }
+    |
+     <LT> { operator = BinaryExpression.Operator.LT; }
+    |
+     <LEQ> { operator = BinaryExpression.Operator.LEQ; }
+  )
+  { return operator; }
+}
+
+/**
+ * Parse a constant.
+ * @return Returns the parsed constant.
+ */
+Literal Constant() :
+{ 
+  Token token;
+  Literal literal; 
+}
+{
+  (
+     token = <INTEGER_CONSTANT> { literal = new IntegerLiteral(token); }
+    | 
+     token = <STRING_CONSTANT> { literal = new StringLiteral(token); }
+    | 
+     token = <NULL> { literal = new NullLiteral(token); }
+  )
+  { return literal; }
+}
+
+/**
+ * Parse a attribute identifier.
+ * @return Returns the parsed attribute identifier.
+ */
+AttributeIdentifier AttributeIdentifier() : 
+{ Token identifier; }
+{
+  identifier = <IDENTIFIER>
+  { return new AttributeIdentifier(identifier); }
+}
+
+/**
+ * Parse a all attribute identifier.
+ * @return Returns the parsed all attribute identifier.
+ */
+AllAttributeIdentifier AllAttributeIdentifier() : 
+{ Token identifier; }
+{
+  identifier = <STAR>
+  { return new AllAttributeIdentifier(identifier); }
+}
+
+/**
+ * Parse a fully qualified attribute identifier.
+ * @return Returns the parsed fully qualified attribute identifier.
+ */
+FullyQualifiedAttributeIdentifier FullyQualifiedAttributeIdentifier() : 
+{ 
+  Token identifier;
+  AttributeIdentifier attributeIdentifier; 
+}
+{
+  identifier = <IDENTIFIER> <DOT> attributeIdentifier = AttributeIdentifier()
+  { return new FullyQualifiedAttributeIdentifier(identifier, attributeIdentifier); }
+}
+
+/**
+ * Parse a table identifier.
+ * @return Returns the parsed table identifier.
+ */
+TableIdentifier TableIdentifier() : 
+{ Token identifier; }
+{
+  identifier = <IDENTIFIER>
+  { return new TableIdentifier(identifier); }
+}
+
+/**
+ * Parse a integer literal.
+ * @return Returns the parsed integer literal.
+ */
+IntegerLiteral IntegerLiteral() :
+{ Token token; }
+{
+  token = <INTEGER_CONSTANT>
+  { return new IntegerLiteral(token); }
+}
+
+/**
+ * Parse a string literal.
+ * @return Returns the parsed string literal.
+ */
+StringLiteral StringLiteral() :
+{ Token token; }
+{
+  token = <STRING_CONSTANT>
+  { return new StringLiteral(token); }
+}
+
+/**
+ * Parse a count() function.
+ * @return Returns the parsed count() function.
+ */
+CountFunction CountFunction() :
+{ AllAttributeIdentifier allAttributeIdentifier; }
+{
+  <COUNT> <LPAREN> allAttributeIdentifier = AllAttributeIdentifier() <RPAREN>
+  { return new CountFunction(allAttributeIdentifier); }
+}
+
+/**
+ * Parse a sum() function.
+ * @return Returns the parsed sum() function.
+ */
+SumFunction SumFunction() :
+{ FullyQualifiedAttributeIdentifier fQAttributeIdentifier; }
+{
+  <SUM> <LPAREN> fQAttributeIdentifier = FullyQualifiedAttributeIdentifier() <RPAREN>
+  { return new SumFunction(fQAttributeIdentifier); }
+}
+
+/**
+ * Parse a max() function.
+ * @return Returns the parsed max() function.
+ */
+MaxFunction MaxFunction() :
+{ FullyQualifiedAttributeIdentifier fQAttributeIdentifier; }
+{
+  <MAX> <LPAREN> fQAttributeIdentifier = FullyQualifiedAttributeIdentifier() <RPAREN>
+  { return new MaxFunction(fQAttributeIdentifier); }
+}
